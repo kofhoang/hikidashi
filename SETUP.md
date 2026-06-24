@@ -12,6 +12,35 @@ You'll wire three things together. Two values must match exactly across them:
 
 ---
 
+## Start here — order of operations
+
+Do these in order; each step produces a value the next one needs. The dependency chain is:
+**WorkOS → Authority**, **Terraform → DATABASE_URL**, **first deploy → the `/mcp` URL**, which then
+feeds **Audience + Resource Indicator**, which unlocks **the app**.
+
+- [ ] **0. (optional) Prove it locally** — `docker compose up -d && dotnet test`. Skip if you lack
+      .NET/Docker; CI runs the tests anyway. (Part A)
+- [ ] **1. WorkOS** — create account, enable AuthKit, enable **DCR + CIMD**, add **Google** sign-in,
+      copy the AuthKit domain → this is **`AUTH_AUTHORITY`**. Leave the Resource Indicator for step 5.
+      (Part B)
+- [ ] **2. Scaleway** — create an account and an admin **API key** (access key, secret key, project ID).
+      The bootstrap credential nothing else can create for you. (Part C)
+- [ ] **3. Terraform bootstrap** — `cd infra && terraform init && terraform apply …` → produces
+      **`DATABASE_URL`** and the registry/container namespaces. ([infra/README.md](infra/README.md))
+- [ ] **4. GitHub secrets + enable deploy** — set `SCW_*`, `DATABASE_URL`, `AUTH_AUTHORITY`, and
+      `AUTH_AUDIENCE=placeholder`; then `gh variable set DEPLOY_ENABLED --body true`. The next push to
+      `main` deploys. **→ Milestone 1: it deploys and the smoke check passes.**
+- [ ] **5. Close the loop** — from the deploy, take the real `https://<endpoint>/mcp` URL: set it as
+      **`AUTH_AUDIENCE`** (update the secret) *and* add it as the **Resource Indicator** in WorkOS, then
+      re-run deploy. These two must match exactly or you get 401s. (Part D step 6)
+- [ ] **6. Connect the Claude iOS app** — add the custom connector, sign in with Google, save/recall a
+      fact. **→ Milestone 2: you can use it.** (Part E)
+
+**What's truly manual** (everything else is `terraform apply` once + CI): all of WorkOS (steps 1 & 5),
+creating the first Scaleway key (step 2), and connecting the app (step 6).
+
+---
+
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) (only if running/testing locally)
