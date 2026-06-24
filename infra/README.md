@@ -33,6 +33,11 @@ gh secret set AUTH_AUTHORITY          --body "https://<your-project>.authkit.app
 gh secret set AUTH_AUDIENCE           --body "https://<endpoint>/mcp"               # known after the first deploy
 ```
 
+Then enable the deploy job (it's dormant until this is set, so CI stays green test-only until you're ready):
+```sh
+gh variable set DEPLOY_ENABLED --body true
+```
+
 `AUTH_AUDIENCE` is chicken-and-egg: set a placeholder, let CI deploy once to learn the container
 endpoint, then set the real `https://<endpoint>/mcp` (and the matching WorkOS Resource Indicator)
 and re-run the pipeline. See [`../SETUP.md`](../SETUP.md) Part D step 6.

@@ -27,7 +27,9 @@ jobs:
 
   deploy:
     needs: test
-    if: github.ref == 'refs/heads/main'
+    # Dormant until you've bootstrapped infra + secrets, then enable with:
+    #   gh variable set DEPLOY_ENABLED --body true
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     env:
       # Scaleway CLI auth (https://www.scaleway.com/en/docs/scaleway-cli/)
