@@ -1,18 +1,17 @@
-using Hikidashi.Data;
-using Npgsql;
+using Microsoft.EntityFrameworkCore;
 using Testcontainers.PostgreSql;
 using Xunit;
 
 namespace Hikidashi.Data.Tests;
 
 /// <summary>
-/// Spins up a real Postgres via Testcontainers and runs the migrations. If Docker is unavailable
+/// Spins up a real Postgres via Testcontainers and applies EF migrations. If Docker is unavailable
 /// the fixture stays <see cref="Available"/> = false and the tests skip rather than fail.
 /// </summary>
 public sealed class PostgresFixture : IAsyncLifetime
 {
     private PostgreSqlContainer? _container;
-    public NpgsqlDataSource? DataSource { get; private set; }
+    private DbContextOptions<FactsDbContext>? _options;
     public bool Available { get; private set; }
 
     public async Task InitializeAsync()
@@ -21,8 +20,11 @@ public sealed class PostgresFixture : IAsyncLifetime
         {
             _container = new PostgreSqlBuilder("postgres:16-alpine").Build();
             await _container.StartAsync();
-            DataSource = NpgsqlDataSource.Create(_container.GetConnectionString());
-            await Migrator.ApplyAsync(DataSource);
+            _options = new DbContextOptionsBuilder<FactsDbContext>()
+                .UseNpgsql(_container.GetConnectionString())
+                .Options;
+            await using var ctx = new FactsDbContext(_options);
+            await ctx.Database.MigrateAsync();
             Available = true;
         }
         catch
@@ -31,10 +33,10 @@ public sealed class PostgresFixture : IAsyncLifetime
         }
     }
 
+    public FactsDbContext NewContext() => new(_options!);
+
     public async Task DisposeAsync()
     {
-        if (DataSource is not null)
-            await DataSource.DisposeAsync();
         if (_container is not null)
             await _container.DisposeAsync();
     }

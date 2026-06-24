@@ -13,7 +13,7 @@ calling model supplies intelligence over MCP, and a managed identity provider ha
 ```
 src/Hikidashi.Core    Pure domain: Fact, ports (IFactRepository), Eff handlers
                       (search/get/list/list-unenriched/keywords/add/update/delete), validation.
-src/Hikidashi.Data    Postgres adapter (Npgsql + Dapper), embedded SQL migration.
+src/Hikidashi.Data    Postgres adapter (EF Core, Npgsql provider), EF migrations.
 src/Hikidashi.Web     Host: MCP server + JWT validation (resource server) + runtime/DI.
 tests/                Core unit tests (in-memory) + Data integration tests (Testcontainers).
 ```
@@ -95,7 +95,7 @@ dotnet test
 ```
 
 Core tests run in-memory and always execute. Data integration tests use Testcontainers and **skip
-automatically when Docker is unavailable** (they exercise the real SQL/Dapper mapping otherwise).
+automatically when Docker is unavailable** (they exercise the real EF/SQL mapping otherwise).
 
 ## Status / things to verify before relying on it
 

@@ -1,6 +1,6 @@
 using Hikidashi.Data;
 using Hikidashi.Web;
-using Npgsql;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,11 +10,11 @@ builder.Services.AddMcpServer().WithHttpTransport().WithToolsFromAssembly();
 
 var app = builder.Build();
 
-// Apply the facts schema on startup (cold-start cost is acceptable for personal use).
+// Apply EF migrations on startup (cold-start cost is acceptable for personal use).
 using (var scope = app.Services.CreateScope())
 {
-    var dataSource = scope.ServiceProvider.GetRequiredService<NpgsqlDataSource>();
-    await Migrator.ApplyAsync(dataSource);
+    var db = scope.ServiceProvider.GetRequiredService<FactsDbContext>();
+    await db.Database.MigrateAsync();
 }
 
 app.UseAuthentication();

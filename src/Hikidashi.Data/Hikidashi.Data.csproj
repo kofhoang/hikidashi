@@ -4,12 +4,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Migrations\*.sql" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Dapper" Version="2.1.79" />
+    <!-- Keep all EF Core packages on the version the Npgsql provider resolves (10.0.4). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.2" />
   </ItemGroup>
 
   <PropertyGroup>

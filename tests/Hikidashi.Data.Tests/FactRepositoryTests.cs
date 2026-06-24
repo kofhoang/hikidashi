@@ -15,7 +15,7 @@ public class FactRepositoryTests(PostgresFixture fx)
     private FactRepository Repo()
     {
         Skip.IfNot(fx.Available, "Docker/Postgres not available");
-        return new FactRepository(fx.DataSource!);
+        return new FactRepository(fx.NewContext());
     }
 
     private static Fact NewFact(string content, params string[] keywords) =>

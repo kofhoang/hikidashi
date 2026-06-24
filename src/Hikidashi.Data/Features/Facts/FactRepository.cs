@@ -1,44 +1,31 @@
-using Dapper;
 using Hikidashi.Core.Facts;
 using LanguageExt;
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
-using NpgsqlTypes;
 using static LanguageExt.Prelude;
 
 namespace Hikidashi.Data;
 
 /// <summary>
-/// Postgres adapter for <see cref="IFactRepository"/>. Reads go through Dapper; writes and the
-/// array-parameter search use raw Npgsql so <c>text[]</c> binds correctly (Dapper would otherwise
-/// expand an array parameter into a positional list). Search is forgiving: per-term ILIKE over
-/// (keywords + content), AND/OR by match mode, ranked by how many terms hit, then recency.
+/// EF Core adapter for <see cref="IFactRepository"/>. CRUD/list use LINQ; the forgiving search and
+/// the keyword-count aggregate use raw SQL via <c>FromSql</c> (the LINQ provider can't express
+/// per-term ILIKE ranking or <c>unnest</c>). Reads are no-tracking — the repo hands back detached
+/// domain objects. Search is forgiving: per-term ILIKE over (keywords + content), AND/OR by match
+/// mode, ranked by how many terms hit, then recency.
 /// </summary>
-public sealed class FactRepository(NpgsqlDataSource dataSource) : IFactRepository
+public sealed class FactRepository(FactsDbContext db) : IFactRepository
 {
-    private const string Cols =
-        "id AS \"Id\", content AS \"Content\", keywords AS \"Keywords\", enriched AS \"Enriched\", "
-        + "metadata::text AS \"Metadata\", created_at AS \"CreatedAt\", updated_at AS \"UpdatedAt\"";
-
     public async Task<FactId> AddAsync(Fact fact)
     {
-        await using var conn = await dataSource.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "INSERT INTO facts (id, content, keywords, enriched, metadata, created_at, updated_at) "
-            + "VALUES (@id, @content, @keywords, @enriched, @metadata::jsonb, @created_at, @updated_at)";
-        AddWriteParams(cmd, fact);
-        await cmd.ExecuteNonQueryAsync();
+        db.Facts.Add(ToRecord(fact));
+        await db.SaveChangesAsync();
         return fact.Id;
     }
 
     public async Task<Option<Fact>> FindByIdAsync(FactId id)
     {
-        await using var conn = await dataSource.OpenConnectionAsync();
-        var row = await conn.QuerySingleOrDefaultAsync<FactRow>(
-            $"SELECT {Cols} FROM facts WHERE id = @id",
-            new { id = id.Value }
-        );
-        return row is null ? None : Some(row.ToFact());
+        var record = await db.Facts.AsNoTracking().FirstOrDefaultAsync(f => f.Id == id.Value);
+        return record is null ? None : Some(ToDomain(record));
     }
 
     public async Task<Seq<Fact>> SearchAsync(Seq<string> terms, MatchMode match, int limit)
@@ -49,116 +36,105 @@ public sealed class FactRepository(NpgsqlDataSource dataSource) : IFactRepositor
 
         var conds = new List<string>(termList.Length);
         var scores = new List<string>(termList.Length);
-        var p = new DynamicParameters();
+        var ps = new List<NpgsqlParameter>(termList.Length + 1);
         for (var i = 0; i < termList.Length; i++)
         {
-            p.Add($"t{i}", "%" + termList[i] + "%");
-            conds.Add($"haystack ILIKE @t{i}");
-            scores.Add($"(CASE WHEN haystack ILIKE @t{i} THEN 1 ELSE 0 END)");
+            conds.Add($"haystack ILIKE @p{i}");
+            scores.Add($"(CASE WHEN haystack ILIKE @p{i} THEN 1 ELSE 0 END)");
+            ps.Add(new NpgsqlParameter($"p{i}", "%" + termList[i] + "%"));
         }
-        p.Add("lim", limit);
+        ps.Add(new NpgsqlParameter("lim", limit));
 
         var joiner = match == MatchMode.All ? " AND " : " OR ";
         var sql =
-            "WITH h AS (SELECT *, (array_to_string(keywords, ' ') || ' ' || content) AS haystack FROM facts) "
-            + $"SELECT {Cols} FROM h WHERE {string.Join(joiner, conds)} "
+            "SELECT id, content, keywords, enriched, metadata, created_at, updated_at FROM ("
+            + "  SELECT *, (array_to_string(keywords, ' ') || ' ' || content) AS haystack FROM facts"
+            + ") h "
+            + $"WHERE {string.Join(joiner, conds)} "
             + $"ORDER BY ({string.Join(" + ", scores)}) DESC, updated_at DESC LIMIT @lim";
 
-        await using var conn = await dataSource.OpenConnectionAsync();
-        var rows = await conn.QueryAsync<FactRow>(sql, p);
-        return toSeq(rows.Select(r => r.ToFact()));
+        var rows = await db.Facts.FromSqlRaw(sql, [.. ps]).AsNoTracking().ToListAsync();
+        return toSeq(rows.Select(ToDomain));
     }
 
     public async Task<Seq<Fact>> ListAsync(int limit, int offset)
     {
-        await using var conn = await dataSource.OpenConnectionAsync();
-        var rows = await conn.QueryAsync<FactRow>(
-            $"SELECT {Cols} FROM facts ORDER BY updated_at DESC LIMIT @limit OFFSET @offset",
-            new { limit, offset }
-        );
-        return toSeq(rows.Select(r => r.ToFact()));
+        var rows = await db
+            .Facts.AsNoTracking()
+            .OrderByDescending(f => f.UpdatedAt)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync();
+        return toSeq(rows.Select(ToDomain));
     }
 
     public async Task<Seq<Fact>> ListUnenrichedAsync(int limit)
     {
-        await using var conn = await dataSource.OpenConnectionAsync();
-        var rows = await conn.QueryAsync<FactRow>(
-            $"SELECT {Cols} FROM facts WHERE enriched = false ORDER BY updated_at DESC LIMIT @limit",
-            new { limit }
-        );
-        return toSeq(rows.Select(r => r.ToFact()));
+        var rows = await db
+            .Facts.AsNoTracking()
+            .Where(f => !f.Enriched)
+            .OrderByDescending(f => f.UpdatedAt)
+            .Take(limit)
+            .ToListAsync();
+        return toSeq(rows.Select(ToDomain));
     }
 
     public async Task<Seq<KeywordCount>> ListKeywordsAsync(Option<string> prefix)
     {
         var pfx = prefix.IfNone(string.Empty);
-        await using var conn = await dataSource.OpenConnectionAsync();
-        var rows = await conn.QueryAsync<KeywordCount>(
+        const string sql =
             "SELECT kw AS \"Keyword\", count(*)::int AS \"Count\" "
-                + "FROM facts f, unnest(f.keywords) AS kw "
-                + "WHERE (@pfx = '' OR kw ILIKE @pfx || '%') "
-                + "GROUP BY kw ORDER BY count(*) DESC, kw ASC",
-            new { pfx }
-        );
-        return toSeq(rows);
+            + "FROM facts f, unnest(f.keywords) AS kw "
+            + "WHERE (@pfx = '' OR kw ILIKE @pfx || '%') "
+            + "GROUP BY kw ORDER BY count(*) DESC, kw ASC";
+
+        var rows = await db
+            .KeywordCounts.FromSqlRaw(sql, new NpgsqlParameter("pfx", pfx))
+            .AsNoTracking()
+            .ToListAsync();
+        return toSeq(rows.Select(r => new KeywordCount(r.Keyword, r.Count)));
     }
 
     public async Task<bool> UpdateAsync(Fact fact)
     {
-        await using var conn = await dataSource.OpenConnectionAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "UPDATE facts SET content = @content, keywords = @keywords, enriched = @enriched, "
-            + "metadata = @metadata::jsonb, updated_at = @updated_at WHERE id = @id";
-        AddWriteParams(cmd, fact);
-        return await cmd.ExecuteNonQueryAsync() > 0;
+        var rows = await db
+            .Facts.Where(f => f.Id == fact.Id.Value)
+            .ExecuteUpdateAsync(s =>
+                s.SetProperty(f => f.Content, fact.Content)
+                    .SetProperty(f => f.Keywords, fact.Keywords.ToArray())
+                    .SetProperty(f => f.Enriched, fact.Enriched)
+                    .SetProperty(f => f.Metadata, fact.Metadata)
+                    .SetProperty(f => f.UpdatedAt, fact.UpdatedAt)
+            );
+        return rows > 0;
     }
 
     public async Task<bool> DeleteAsync(FactId id)
     {
-        await using var conn = await dataSource.OpenConnectionAsync();
-        var rows = await conn.ExecuteAsync(
-            "DELETE FROM facts WHERE id = @id",
-            new { id = id.Value }
-        );
+        var rows = await db.Facts.Where(f => f.Id == id.Value).ExecuteDeleteAsync();
         return rows > 0;
     }
 
-    private static void AddWriteParams(NpgsqlCommand cmd, Fact fact)
-    {
-        cmd.Parameters.AddWithValue("id", fact.Id.Value);
-        cmd.Parameters.AddWithValue("content", fact.Content);
-        cmd.Parameters.Add(
-            new NpgsqlParameter("keywords", NpgsqlDbType.Array | NpgsqlDbType.Text)
-            {
-                Value = fact.Keywords.ToArray(),
-            }
+    private static Fact ToDomain(FactRecord r) =>
+        new(
+            new FactId(r.Id),
+            r.Content,
+            toSeq(r.Keywords),
+            r.Enriched,
+            r.Metadata,
+            r.CreatedAt,
+            r.UpdatedAt
         );
-        cmd.Parameters.AddWithValue("enriched", fact.Enriched);
-        cmd.Parameters.AddWithValue("metadata", fact.Metadata);
-        cmd.Parameters.AddWithValue("created_at", fact.CreatedAt);
-        cmd.Parameters.AddWithValue("updated_at", fact.UpdatedAt);
-    }
 
-    private sealed class FactRow
-    {
-        public Guid Id { get; init; }
-        public string Content { get; init; } = "";
-        public string[] Keywords { get; init; } = [];
-        public bool Enriched { get; init; }
-        public string Metadata { get; init; } = "{}";
-        public DateTime CreatedAt { get; init; }
-        public DateTime UpdatedAt { get; init; }
-
-        public Fact ToFact() =>
-            new(
-                new FactId(Id),
-                Content,
-                toSeq(Keywords),
-                Enriched,
-                Metadata,
-                new DateTimeOffset(DateTime.SpecifyKind(CreatedAt, DateTimeKind.Utc)),
-                new DateTimeOffset(DateTime.SpecifyKind(UpdatedAt, DateTimeKind.Utc))
-            );
-    }
+    private static FactRecord ToRecord(Fact f) =>
+        new()
+        {
+            Id = f.Id.Value,
+            Content = f.Content,
+            Keywords = f.Keywords.ToArray(),
+            Enriched = f.Enriched,
+            Metadata = f.Metadata,
+            CreatedAt = f.CreatedAt,
+            UpdatedAt = f.UpdatedAt,
+        };
 }

@@ -1,7 +1,7 @@
 using Hikidashi.Core;
 using Hikidashi.Core.Facts;
 using Hikidashi.Data;
-using Npgsql;
+using Microsoft.EntityFrameworkCore;
 
 namespace Hikidashi.Web;
 
@@ -20,7 +20,7 @@ public static class InfrastructureExtensions
             );
 
         services
-            .AddSingleton(NpgsqlDataSource.Create(connectionString))
+            .AddDbContext<FactsDbContext>(options => options.UseNpgsql(connectionString))
             .AddSingleton<IClock>(SystemClock.Instance)
             .AddSingleton<IIdGenerator>(SystemIdGenerator.Instance)
             .AddScoped<IFactRepository, FactRepository>()
