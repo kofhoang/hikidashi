@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore Hikidashi.slnx
+
+      - name: Build
+        run: dotnet build Hikidashi.slnx -c Release --no-restore
+
+      # ubuntu-latest has Docker, so the Testcontainers Postgres integration
+      # tests run for real here (they skip locally when Docker is absent).
+      - name: Test
+        run: dotnet test Hikidashi.slnx -c Release --no-build --verbosity normal
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      # Scaleway CLI auth (https://www.scaleway.com/en/docs/scaleway-cli/)
+      SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+      SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+      SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+      SCW_DEFAULT_REGION: fr-par
+      # App config consumed by deploy.sh
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_AUTHORITY: ${{ secrets.AUTH_AUTHORITY }}
+      AUTH_AUDIENCE: ${{ secrets.AUTH_AUDIENCE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Scaleway CLI
+        run: |
+          VER=2.40.0
+          curl -fsSL -o scw "https://github.com/scaleway/scaleway-cli/releases/download/v${VER}/scaleway-cli_${VER}_linux_amd64"
+          sudo install -m 0755 scw /usr/local/bin/scw
+          scw version
+
+      - name: Build, push, deploy
+        id: deploy
+        run: ./deploy.sh
+
+      - name: Smoke check
+        run: |
+          url="${{ steps.deploy.outputs.mcp_url }}"
+          echo "Checking $url"
+          code=""
+          # Retry to absorb cold start (container + DB from zero).
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$url" || true)
+            [ "$code" = "401" ] && break
+            echo "attempt $i: got '$code' (cold start?), retrying in 5s"
+            sleep 5
+          done
+          [ "$code" = "401" ] || { echo "::error::expected 401 (auth required) from $url, got '$code'"; exit 1; }
+          base="${url%/mcp}"
+          curl -fsS --max-time 30 "$base/.well-known/oauth-protected-resource" >/dev/null \
+            || { echo "::error::protected-resource metadata did not resolve"; exit 1; }
+          echo "Smoke check passed: /mcp requires auth and resource metadata is served."

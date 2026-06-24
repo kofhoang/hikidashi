@@ -87,6 +87,10 @@ else
 fi
 
 domain="$(scw container container get "$c_id" region="$SCW_REGION" -o json | jq -r '.domain_name')"
+# Expose the URL to a GitHub Actions step output when running in CI.
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo "mcp_url=https://${domain}/mcp" >>"$GITHUB_OUTPUT"
+fi
 echo
 echo "==> Deployed. MCP URL:  https://${domain}/mcp"
 if [ "$AUTH_AUDIENCE" != "https://${domain}/mcp" ]; then
