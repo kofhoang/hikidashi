@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Hikidashi.Core/Hikidashi.Core.csproj" />
+    <Project Path="src/Hikidashi.Data/Hikidashi.Data.csproj" />
+    <Project Path="src/Hikidashi.Web/Hikidashi.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Hikidashi.Core.Tests/Hikidashi.Core.Tests.csproj" />
+    <Project Path="tests/Hikidashi.Data.Tests/Hikidashi.Data.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,15 @@
+# Local Postgres for development. Run `docker compose up -d`, then `dotnet run` in src/Hikidashi.Web.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hikidashi
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
