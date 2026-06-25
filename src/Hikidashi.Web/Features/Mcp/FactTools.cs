@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Linq;
+using Hikidashi.Core;
 using Hikidashi.Core.Facts;
 using LanguageExt;
 using ModelContextProtocol.Server;
@@ -41,24 +42,14 @@ public static class FactTools
         [Description("Maximum number of facts to return (default 20).")] int limit = 20
     )
     {
-        if (keywords.Length == 0)
-            throw new InvalidOperationException(
-                "keywords must contain at least one term; an empty array always returns nothing."
-            );
-
-        var mode = match.ToLowerInvariant() switch
-        {
-            "any" => MatchMode.Any,
-            "all" => MatchMode.All,
-            _ => throw new InvalidOperationException(
-                $"match must be \"any\" or \"all\"; got \"{match}\"."
-            ),
-        };
         var facts = await Run(
             rt,
-            SearchFactsHandler<AppRuntime>.Handle(
-                new SearchFactsQuery(toSeq(keywords), mode, limit)
+            from kws in ParseKeywords(keywords)
+            from mode in ParseMatch(match)
+            from results in SearchFactsHandler<AppRuntime>.Handle(
+                new SearchFactsQuery(kws, mode, limit)
             )
+            select results
         );
         return facts.Map(ToHit).ToArray();
     }
@@ -96,8 +87,12 @@ public static class FactTools
             string id
     )
     {
-        var fid = ParseId(id);
-        var fact = await Run(rt, GetFactHandler<AppRuntime>.Handle(new GetFactQuery(fid)));
+        var fact = await Run(
+            rt,
+            from fid in ParseIdEff(id)
+            from f in GetFactHandler<AppRuntime>.Handle(new GetFactQuery(fid))
+            select f
+        );
         return new FactDetail(
             fact.Id.ToString(),
             fact.Content,
@@ -195,16 +190,17 @@ public static class FactTools
             string[]? keywords = null
     )
     {
-        var fid = ParseId(id);
         var fact = await Run(
             rt,
-            UpdateFactHandler<AppRuntime>.Handle(
+            from fid in ParseIdEff(id)
+            from f in UpdateFactHandler<AppRuntime>.Handle(
                 new UpdateFactCommand(
                     fid,
                     Optional(content),
                     keywords is null ? Option<Seq<string>>.None : Some(toSeq(keywords))
                 )
             )
+            select f
         );
         return ToHit(fact);
     }
@@ -218,21 +214,50 @@ public static class FactTools
         [Description("The fact id (uuid).")] string id
     )
     {
-        var fid = ParseId(id);
-        await Run(rt, DeleteFactHandler<AppRuntime>.Handle(new DeleteFactCommand(fid)));
-        return new IdResult(fid.ToString());
+        var deletedId = await Run(
+            rt,
+            from fid in ParseIdEff(id)
+            from _ in DeleteFactHandler<AppRuntime>.Handle(new DeleteFactCommand(fid))
+            select fid
+        );
+        return new IdResult(deletedId.ToString());
     }
 
-    private static FactHit ToHit(Fact f) =>
-        new(f.Id.ToString(), f.Content, f.Keywords.ToArray(), f.UpdatedAt.ToString("O"));
+    private static Eff<AppRuntime, Seq<string>> ParseKeywords(string[] keywords)
+    {
+        var kws = toSeq(keywords);
+        return kws.IsEmpty
+            ? FailEff<AppRuntime, Seq<string>>(
+                new ValidationError(
+                    "keywords must contain at least one term; an empty array always returns nothing."
+                )
+            )
+            : SuccessEff<AppRuntime, Seq<string>>(kws);
+    }
 
-    private static FactId ParseId(string id) =>
+    private static Eff<AppRuntime, MatchMode> ParseMatch(string match) =>
+        match.ToLowerInvariant() switch
+        {
+            "any" => SuccessEff<AppRuntime, MatchMode>(MatchMode.Any),
+            "all" => SuccessEff<AppRuntime, MatchMode>(MatchMode.All),
+            _ => FailEff<AppRuntime, MatchMode>(
+                new ValidationError($"match must be \"any\" or \"all\"; got \"{match}\".")
+            ),
+        };
+
+    private static Eff<AppRuntime, FactId> ParseIdEff(string id) =>
         FactId
             .Parse(id)
             .Match(
-                Some: f => f,
-                None: () => throw new InvalidOperationException($"'{id}' is not a valid fact id.")
+                Some: fid => SuccessEff<AppRuntime, FactId>(fid),
+                None: () =>
+                    FailEff<AppRuntime, FactId>(
+                        new ValidationError($"'{id}' is not a valid fact id.")
+                    )
             );
+
+    private static FactHit ToHit(Fact f) =>
+        new(f.Id.ToString(), f.Content, f.Keywords.ToArray(), f.UpdatedAt.ToString("O"));
 
     private static async Task<T> Run<T>(AppRuntime rt, Eff<AppRuntime, T> eff) =>
         (await eff.RunAsync(rt)).Match(
