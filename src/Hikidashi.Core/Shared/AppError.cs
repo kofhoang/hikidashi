@@ -5,20 +5,26 @@ using static LanguageExt.Prelude;
 namespace Hikidashi.Core;
 
 /// <summary>
-/// Domain errors as <see cref="Expected"/> subtypes carrying the HTTP status they map to.
-/// Handlers fail with these; the web boundary translates them to responses and the MCP
-/// boundary turns them into structured tool errors.
+/// Domain errors as a sealed DU over <see cref="Expected"/>. The <c>private protected</c>
+/// constructor means only this assembly can introduce new cases. Handlers fail with these;
+/// the MCP boundary translates them into structured tool errors.
 /// </summary>
-public record NotFoundError(string Entity, string Id)
-    : Expected($"{Entity} '{Id}' not found", 404, None);
+public abstract record AppError : Expected
+{
+    private protected AppError(string message, int statusCode)
+        : base(message, statusCode, None) { }
+}
 
-public record ValidationError : Expected
+public sealed record NotFoundError(string Entity, string Id)
+    : AppError($"{Entity} '{Id}' not found", 404);
+
+public sealed record ValidationError : AppError
 {
     public Seq<string> Messages { get; }
 
     public ValidationError(string message)
-        : base(message, 400, None) => Messages = [message];
+        : base(message, 400) => Messages = [message];
 
     public ValidationError(Seq<string> messages)
-        : base(string.Join("; ", messages), 400, None) => Messages = messages;
+        : base(string.Join("; ", messages), 400) => Messages = messages;
 }

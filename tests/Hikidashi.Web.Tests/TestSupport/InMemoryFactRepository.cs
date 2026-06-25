@@ -30,7 +30,7 @@ public sealed class InMemoryFactRepository : IFactRepository
         int Score(Fact f) => terms.Filter(t => Hits(f, t)).Count;
 
         bool Matches(Fact f) =>
-            match == MatchMode.All ? terms.ForAll(t => Hits(f, t)) : terms.Exists(t => Hits(f, t));
+            match is MatchMode.All ? terms.ForAll(t => Hits(f, t)) : terms.Exists(t => Hits(f, t));
 
         var results = _store
             .Values.Where(Matches)

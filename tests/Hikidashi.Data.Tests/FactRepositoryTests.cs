@@ -53,7 +53,7 @@ public class FactRepositoryTests(PostgresFixture fx)
         await repo.AddAsync(NewFact("Only apples here.", "apple"));
         await repo.AddAsync(NewFact("Apples and bananas together.", "apple", "banana"));
 
-        var hits = await repo.SearchAsync(toSeq(["apple", "banana"]), MatchMode.Any, 20);
+        var hits = await repo.SearchAsync(toSeq(["apple", "banana"]), new MatchMode.Any(), 20);
 
         Assert.Equal(2, hits.Count);
         Assert.Contains("bananas", hits[0].Content);
@@ -66,7 +66,7 @@ public class FactRepositoryTests(PostgresFixture fx)
         await repo.AddAsync(NewFact("Birthday cards in the drawer.", "cards"));
         await repo.AddAsync(NewFact("Spare key under the desk.", "key"));
 
-        var all = await repo.SearchAsync(toSeq(["drawer", "cards"]), MatchMode.All, 20);
+        var all = await repo.SearchAsync(toSeq(["drawer", "cards"]), new MatchMode.All(), 20);
 
         Assert.Single(all);
         Assert.Contains("Birthday cards", all[0].Content);

@@ -45,7 +45,7 @@ public sealed class FactRepository(FactsDbContext db) : IFactRepository
         }
         ps.Add(new NpgsqlParameter("lim", limit));
 
-        var joiner = match == MatchMode.All ? " AND " : " OR ";
+        var joiner = match is MatchMode.All ? " AND " : " OR ";
         var sql =
             "SELECT id, content, keywords, enriched, metadata, created_at, updated_at FROM ("
             + "  SELECT *, (array_to_string(keywords, ' ') || ' ' || content) AS haystack FROM facts"

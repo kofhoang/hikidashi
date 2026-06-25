@@ -238,8 +238,8 @@ public static class FactTools
     private static Eff<AppRuntime, MatchMode> ParseMatch(string match) =>
         match.ToLowerInvariant() switch
         {
-            "any" => SuccessEff<AppRuntime, MatchMode>(MatchMode.Any),
-            "all" => SuccessEff<AppRuntime, MatchMode>(MatchMode.All),
+            "any" => SuccessEff<AppRuntime, MatchMode>(new MatchMode.Any()),
+            "all" => SuccessEff<AppRuntime, MatchMode>(new MatchMode.All()),
             _ => FailEff<AppRuntime, MatchMode>(
                 new ValidationError($"match must be \"any\" or \"all\"; got \"{match}\".")
             ),

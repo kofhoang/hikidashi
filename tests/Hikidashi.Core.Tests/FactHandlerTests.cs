@@ -79,7 +79,7 @@ public class FactHandlerTests
 
         var hits = await Succ(
             SearchFactsHandler<TestRuntime>.Handle(
-                new SearchFactsQuery(toSeq(["drawer", "nonsense"]), MatchMode.Any, 20)
+                new SearchFactsQuery(toSeq(["drawer", "nonsense"]), new MatchMode.Any(), 20)
             ),
             rt
         );
@@ -97,13 +97,13 @@ public class FactHandlerTests
 
         var any = await Succ(
             SearchFactsHandler<TestRuntime>.Handle(
-                new SearchFactsQuery(toSeq(["drawer", "cards"]), MatchMode.Any, 20)
+                new SearchFactsQuery(toSeq(["drawer", "cards"]), new MatchMode.Any(), 20)
             ),
             rt
         );
         var all = await Succ(
             SearchFactsHandler<TestRuntime>.Handle(
-                new SearchFactsQuery(toSeq(["drawer", "cards"]), MatchMode.All, 20)
+                new SearchFactsQuery(toSeq(["drawer", "cards"]), new MatchMode.All(), 20)
             ),
             rt
         );
@@ -122,7 +122,7 @@ public class FactHandlerTests
 
         var hits = await Succ(
             SearchFactsHandler<TestRuntime>.Handle(
-                new SearchFactsQuery(toSeq(["apple", "banana"]), MatchMode.Any, 20)
+                new SearchFactsQuery(toSeq(["apple", "banana"]), new MatchMode.Any(), 20)
             ),
             rt
         );
@@ -139,7 +139,7 @@ public class FactHandlerTests
 
         var hits = await Succ(
             SearchFactsHandler<TestRuntime>.Handle(
-                new SearchFactsQuery(toSeq(["  ", ""]), MatchMode.Any, 20)
+                new SearchFactsQuery(toSeq(["  ", ""]), new MatchMode.Any(), 20)
             ),
             rt
         );
