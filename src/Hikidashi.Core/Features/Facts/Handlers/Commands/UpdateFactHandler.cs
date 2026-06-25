@@ -10,12 +10,9 @@ public static class UpdateFactHandler<TRt>
         from parsed in FactCommandValidation.Parse(command).ToEff<TRt, UpdateFactParsed>()
         from existing in FactRepo<TRt>.FindOrError(command.Id)
         from now in Clock<TRt>.UtcNow()
-        from fact in CommitUpdate(Apply(existing, parsed, now))
-        select fact;
-
-    private static Eff<TRt, Fact> CommitUpdate(Fact fact) =>
-        from _ in FactRepo<TRt>.Update(fact)
-        select fact;
+        let updated = Apply(existing, parsed, now)
+        from _ in FactRepo<TRt>.Update(updated)
+        select updated;
 
     private static Fact Apply(Fact existing, UpdateFactParsed parsed, DateTimeOffset now)
     {
