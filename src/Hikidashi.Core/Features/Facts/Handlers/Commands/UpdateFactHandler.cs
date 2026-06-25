@@ -6,12 +6,16 @@ namespace Hikidashi.Core.Facts;
 public static class UpdateFactHandler<TRt>
     where TRt : IHasFactRepository, IHasClock
 {
-    public static Eff<TRt, FactId> Handle(UpdateFactCommand command) =>
+    public static Eff<TRt, Fact> Handle(UpdateFactCommand command) =>
         from parsed in FactCommandValidation.Parse(command).ToEff<TRt, UpdateFactParsed>()
         from existing in FactRepo<TRt>.FindOrError(command.Id)
         from now in Clock<TRt>.UtcNow()
-        from _ in FactRepo<TRt>.Update(Apply(existing, parsed, now))
-        select existing.Id;
+        from fact in CommitUpdate(Apply(existing, parsed, now))
+        select fact;
+
+    private static Eff<TRt, Fact> CommitUpdate(Fact fact) =>
+        from _ in FactRepo<TRt>.Update(fact)
+        select fact;
 
     private static Fact Apply(Fact existing, UpdateFactParsed parsed, DateTimeOffset now)
     {

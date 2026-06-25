@@ -26,10 +26,12 @@ public class FactHandlerTests
         string content,
         params string[] keywords
     ) =>
-        await Succ(
-            AddFactHandler<TestRuntime>.Handle(new AddFactCommand(content, toSeq(keywords))),
-            rt
-        );
+        (
+            await Succ(
+                AddFactHandler<TestRuntime>.Handle(new AddFactCommand(content, toSeq(keywords))),
+                rt
+            )
+        ).Id;
 
     [Fact]
     public async Task Add_then_get_returns_content_verbatim()
@@ -246,6 +248,59 @@ public class FactHandlerTests
         );
         Assert.Single(pending);
         Assert.Equal(quick, pending[0].Id);
+    }
+
+    [Fact]
+    public async Task AddHandler_returns_full_fact_with_content_and_keywords()
+    {
+        var rt = TestRuntime.Create();
+
+        var fact = await Succ(
+            AddFactHandler<TestRuntime>.Handle(
+                new AddFactCommand("my content", toSeq(["kw1", "kw2"]))
+            ),
+            rt
+        );
+
+        Assert.Equal("my content", fact.Content);
+        Assert.Equal(["kw1", "kw2"], fact.Keywords);
+        Assert.True(fact.Enriched);
+    }
+
+    [Fact]
+    public async Task UpdateHandler_returns_updated_fact()
+    {
+        var rt = TestRuntime.Create();
+        var id = await Add(rt, "old content", "kw1");
+
+        var updated = await Succ(
+            UpdateFactHandler<TestRuntime>.Handle(
+                new UpdateFactCommand(id, Some("new content"), Some(toSeq(["kw2", "kw3"])))
+            ),
+            rt
+        );
+
+        Assert.Equal("new content", updated.Content);
+        Assert.Equal(["kw2", "kw3"], updated.Keywords);
+        Assert.True(updated.Enriched);
+    }
+
+    [Fact]
+    public async Task Update_with_empty_keywords_clears_keywords_and_unenriches()
+    {
+        var rt = TestRuntime.Create();
+        var id = await Add(rt, "answer", "kw1", "kw2");
+
+        await Succ(
+            UpdateFactHandler<TestRuntime>.Handle(
+                new UpdateFactCommand(id, Option<string>.None, Some(toSeq(new string[0])))
+            ),
+            rt
+        );
+        var fact = await Succ(GetFactHandler<TestRuntime>.Handle(new GetFactQuery(id)), rt);
+
+        Assert.Empty(fact.Keywords);
+        Assert.False(fact.Enriched);
     }
 
     [Fact]

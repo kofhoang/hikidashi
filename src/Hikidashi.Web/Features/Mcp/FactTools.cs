@@ -17,28 +17,43 @@ public static class FactTools
 {
     [McpServerTool(Name = "search_facts", ReadOnly = true)]
     [Description(
-        "Search the user's stored personal facts by keyword. Matching is forgiving — substring over "
-            + "both the keywords and the answer text — so partial terms work. Pass several keywords, "
-            + "including synonyms and natural phrasings of the question. IMPORTANT: if the results are "
-            + "empty or weak, call list_keywords to see which topics exist, then search again using that "
-            + "vocabulary. The returned `keywords` reflect the user's own wording — reuse them. `content` "
-            + "is the stored answer, returned verbatim and complete (e.g. whole checklists); relay it as-is, "
-            + "never summarize it unless asked."
+        "Search stored facts by keyword; returns matching items with id, content, keywords, and "
+            + "last-updated timestamp. Matching is forgiving: substring search over both the stored "
+            + "keywords and the content text, so partial terms and synonyms work. Pass several "
+            + "keywords including synonyms and different question phrasings to maximize recall. "
+            + "Content is returned verbatim and complete — relay it as-is, never summarize unless "
+            + "asked. Requires at least one keyword; an empty array is an error. "
+            + "FALLBACK: if results are empty or weak, call list_keywords to discover the available "
+            + "vocabulary, then search again using those terms."
     )]
     public static async Task<FactHit[]> SearchFacts(
         AppRuntime rt,
-        [Description("Search terms: synonyms and question phrasings improve recall.")]
+        [Description(
+            "One or more search terms — synonyms and question phrasings improve recall. "
+                + "An empty array is an error."
+        )]
             string[] keywords,
         [Description(
-            "\"any\" (default, OR — maximizes recall) or \"all\" (AND — every term must match)."
+            "\"any\" (default, OR — maximizes recall) or \"all\" (AND — every term must match). "
+                + "Any other value is an error."
         )]
             string match = "any",
         [Description("Maximum number of facts to return (default 20).")] int limit = 20
     )
     {
-        var mode = string.Equals(match, "all", StringComparison.OrdinalIgnoreCase)
-            ? MatchMode.All
-            : MatchMode.Any;
+        if (keywords.Length == 0)
+            throw new InvalidOperationException(
+                "keywords must contain at least one term; an empty array always returns nothing."
+            );
+
+        var mode = match.ToLowerInvariant() switch
+        {
+            "any" => MatchMode.Any,
+            "all" => MatchMode.All,
+            _ => throw new InvalidOperationException(
+                $"match must be \"any\" or \"all\"; got \"{match}\"."
+            ),
+        };
         var facts = await Run(
             rt,
             SearchFactsHandler<AppRuntime>.Handle(
@@ -50,8 +65,9 @@ public static class FactTools
 
     [McpServerTool(Name = "list_keywords", ReadOnly = true)]
     [Description(
-        "List every keyword in the store with its count, optionally filtered by prefix. Use this to "
-            + "discover the user's vocabulary when a search returns weak or empty results, then search again."
+        "List every keyword in the store with its count, optionally filtered by prefix. Use this "
+            + "to discover the user's vocabulary when a search returns weak or empty results, then "
+            + "search again using those terms."
     )]
     public static async Task<KeywordCount[]> ListKeywords(
         AppRuntime rt,
@@ -67,11 +83,17 @@ public static class FactTools
 
     [McpServerTool(Name = "get_fact", ReadOnly = true)]
     [Description(
-        "Get one fact in full by its id. Returns the verbatim content, keywords, and metadata."
+        "Retrieve one fact in full by its id. Returns verbatim content, keywords, enriched status "
+            + "(false = quick capture without keywords; search coverage is limited until keywords "
+            + "are added), metadata (reserved for future use; always {}), and last-updated "
+            + "timestamp. Use the id returned by search_facts, list_facts, add_fact, or update_fact."
     )]
     public static async Task<FactDetail> GetFact(
         AppRuntime rt,
-        [Description("The fact id (uuid).")] string id
+        [Description(
+            "The fact id (uuid), as returned by search_facts, list_facts, add_fact, or update_fact."
+        )]
+            string id
     )
     {
         var fid = ParseId(id);
@@ -81,13 +103,15 @@ public static class FactTools
             fact.Content,
             fact.Keywords.ToArray(),
             fact.Enriched,
-            fact.Metadata
+            fact.Metadata,
+            fact.UpdatedAt.ToString("O")
         );
     }
 
     [McpServerTool(Name = "list_facts", ReadOnly = true)]
     [Description(
-        "List stored facts, most recently updated first. For browsing; prefer search_facts to answer questions."
+        "List stored facts most-recently-updated first, with id, content, keywords, and timestamp. "
+            + "For browsing; prefer search_facts to answer specific questions."
     )]
     public static async Task<FactHit[]> ListFacts(
         AppRuntime rt,
@@ -104,33 +128,37 @@ public static class FactTools
 
     [McpServerTool(Name = "add_fact")]
     [Description(
-        "Store a new durable fact. `content` is the answer, saved and returned verbatim — never summarize "
-            + "or truncate it (store whole checklists in full). Normally supply GENEROUS keywords: synonyms "
-            + "plus the different questions the user might later ask to find this. You MAY omit keywords for a "
-            + "quick capture — the fact is then marked un-enriched and can be backfilled later via "
-            + "list_unenriched_facts. Returns the new fact id."
+        "Store a new durable fact. Content is saved verbatim — never summarize or truncate it "
+            + "(store whole checklists in full). Normally supply GENEROUS keywords: synonyms plus "
+            + "the different questions the user might later ask to find this. Keywords are trimmed "
+            + "and case-insensitive duplicates are dropped. Returns the stored fact (id, content, "
+            + "keywords, timestamp) for immediate confirmation. You MAY omit keywords for a quick "
+            + "capture — the fact is flagged un-enriched and can be backfilled later via "
+            + "list_unenriched_facts."
     )]
-    public static async Task<IdResult> AddFact(
+    public static async Task<FactHit> AddFact(
         AppRuntime rt,
         [Description("The answer to store, verbatim.")] string content,
         [Description(
-            "Generous findability terms: synonyms and question phrasings. Omit for a quick capture."
+            "Generous findability terms: synonyms and question phrasings. Omit (null) for a quick "
+                + "capture; an empty array has the same effect as omitting."
         )]
             string[]? keywords = null
     )
     {
-        var id = await Run(
+        var fact = await Run(
             rt,
             AddFactHandler<AppRuntime>.Handle(new AddFactCommand(content, toSeq(keywords ?? [])))
         );
-        return new IdResult(id.ToString());
+        return ToHit(fact);
     }
 
     [McpServerTool(Name = "list_unenriched_facts", ReadOnly = true)]
     [Description(
-        "List facts that were captured WITHOUT keywords and are awaiting enrichment, most recent first. "
-            + "For each, read the content and call update_fact with generous keywords (synonyms + question "
-            + "phrasings) — that marks the fact enriched. Use this to clean up quick captures so they become findable."
+        "List facts that were captured WITHOUT keywords and are awaiting enrichment, most recent "
+            + "first. For each, read the content and call update_fact with generous keywords "
+            + "(synonyms + question phrasings) — that marks the fact enriched. Use this to clean "
+            + "up quick captures so they become findable."
     )]
     public static async Task<FactHit[]> ListUnenrichedFacts(
         AppRuntime rt,
@@ -146,20 +174,29 @@ public static class FactTools
 
     [McpServerTool(Name = "update_fact", Idempotent = true)]
     [Description(
-        "Update a fact's content and/or keywords by id. Omit a field to leave it unchanged. When you "
-            + "change content, keep it verbatim and re-supply generous keywords if the topic shifted."
+        "Update a fact's content and/or keywords. Omit a field entirely (null) to leave it "
+            + "unchanged; returns the fact after update. IMPORTANT: passing an empty keywords "
+            + "array ([]) CLEARS all keywords and marks the fact un-enriched — omit keywords "
+            + "(null) to keep the existing ones. When changing content, keep it verbatim and "
+            + "re-supply generous keywords if the topic shifted."
     )]
-    public static async Task<IdResult> UpdateFact(
+    public static async Task<FactHit> UpdateFact(
         AppRuntime rt,
-        [Description("The fact id (uuid).")] string id,
-        [Description("New verbatim content, or omit to keep the existing content.")]
+        [Description(
+            "The fact id (uuid), as returned by search_facts, list_facts, add_fact, or a prior update_fact."
+        )]
+            string id,
+        [Description("New verbatim content, or omit (null) to keep the existing content.")]
             string? content = null,
-        [Description("Replacement keywords, or omit to keep the existing keywords.")]
+        [Description(
+            "Replacement keywords, or omit entirely (null) to keep existing ones. "
+                + "Passing an empty array ([]) CLEARS all keywords and marks the fact un-enriched."
+        )]
             string[]? keywords = null
     )
     {
         var fid = ParseId(id);
-        var updated = await Run(
+        var fact = await Run(
             rt,
             UpdateFactHandler<AppRuntime>.Handle(
                 new UpdateFactCommand(
@@ -169,7 +206,7 @@ public static class FactTools
                 )
             )
         );
-        return new IdResult(updated.ToString());
+        return ToHit(fact);
     }
 
     [McpServerTool(Name = "delete_fact", Destructive = true)]
@@ -186,7 +223,8 @@ public static class FactTools
         return new IdResult(fid.ToString());
     }
 
-    private static FactHit ToHit(Fact f) => new(f.Id.ToString(), f.Content, f.Keywords.ToArray());
+    private static FactHit ToHit(Fact f) =>
+        new(f.Id.ToString(), f.Content, f.Keywords.ToArray(), f.UpdatedAt.ToString("O"));
 
     private static FactId ParseId(string id) =>
         FactId
@@ -203,14 +241,15 @@ public static class FactTools
         );
 }
 
-public record FactHit(string Id, string Content, string[] Keywords);
+public record FactHit(string Id, string Content, string[] Keywords, string UpdatedAt);
 
 public record FactDetail(
     string Id,
     string Content,
     string[] Keywords,
     bool Enriched,
-    string Metadata
+    string Metadata,
+    string UpdatedAt
 );
 
 public record IdResult(string Id);

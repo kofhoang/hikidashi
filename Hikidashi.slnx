@@ -7,5 +7,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/Hikidashi.Core.Tests/Hikidashi.Core.Tests.csproj" />
     <Project Path="tests/Hikidashi.Data.Tests/Hikidashi.Data.Tests.csproj" />
+    <Project Path="tests/Hikidashi.Web.Tests/Hikidashi.Web.Tests.csproj" />
   </Folder>
 </Solution>
