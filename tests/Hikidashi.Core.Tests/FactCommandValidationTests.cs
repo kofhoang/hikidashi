@@ -89,7 +89,7 @@ public class FactCommandValidationTests
         Assert.Equal("fresh content", parsed.Content.Match(Some: c => (string)c, None: () => ""));
         Assert.Equal(
             ["wifi", "password"],
-            parsed.Keywords.Match(Some: k => k, None: () => Seq<string>.Empty)
+            parsed.Keywords.Match(Some: k => k, None: () => LanguageExt.Seq<string>.Empty)
         );
     }
 }
