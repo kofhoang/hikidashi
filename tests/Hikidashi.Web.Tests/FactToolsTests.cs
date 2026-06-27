@@ -180,4 +180,63 @@ public class FactToolsTests
 
         Assert.False(detail.Enriched);
     }
+
+    // ── Malformed id guard: the model can pass anything as an id string ────
+
+    [Fact]
+    public async Task GetFact_rejects_a_malformed_id()
+    {
+        var rt = Runtime();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => FactTools.GetFact(rt, "not-a-uuid")
+        );
+        Assert.Contains("not a valid", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UpdateFact_rejects_a_malformed_id()
+    {
+        var rt = Runtime();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => FactTools.UpdateFact(rt, "not-a-uuid", "content")
+        );
+    }
+
+    [Fact]
+    public async Task DeleteFact_rejects_a_malformed_id()
+    {
+        var rt = Runtime();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => FactTools.DeleteFact(rt, "not-a-uuid")
+        );
+    }
+
+    // ── delete_fact: the destructive tool ─────────────────────────────────
+
+    [Fact]
+    public async Task DeleteFact_removes_the_fact_and_returns_its_id()
+    {
+        var rt = Runtime();
+        var added = await FactTools.AddFact(rt, "to delete", ["kw"]);
+
+        var result = await FactTools.DeleteFact(rt, added.Id);
+
+        Assert.Equal(added.Id, result.Id);
+        // The fact is really gone — a follow-up read fails.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => FactTools.GetFact(rt, added.Id));
+    }
+
+    [Fact]
+    public async Task DeleteFact_on_a_missing_fact_is_an_error()
+    {
+        var rt = Runtime();
+        var neverAdded = Guid.NewGuid().ToString();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => FactTools.DeleteFact(rt, neverAdded)
+        );
+    }
 }

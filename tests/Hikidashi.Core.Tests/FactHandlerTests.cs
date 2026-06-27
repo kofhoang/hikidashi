@@ -325,4 +325,105 @@ public class FactHandlerTests
         );
         Assert.True(pending.IsEmpty);
     }
+
+    [Fact]
+    public async Task Update_with_blank_content_fails_validation()
+    {
+        var rt = TestRuntime.Create();
+        var id = await Add(rt, "original answer", "kw");
+
+        var err = await Fail(
+            UpdateFactHandler<TestRuntime>.Handle(
+                new UpdateFactCommand(id, Some("   "), Option<Seq<string>>.None)
+            ),
+            rt
+        );
+
+        // A supplied-but-blank content is rejected; it must not silently wipe the stored answer.
+        Assert.IsType<ValidationError>(err);
+        var unchanged = await Succ(GetFactHandler<TestRuntime>.Handle(new GetFactQuery(id)), rt);
+        Assert.Equal("original answer", unchanged.Content);
+    }
+
+    [Fact]
+    public async Task Update_preserves_CreatedAt_and_advances_UpdatedAt()
+    {
+        // A clock that advances on each read so create and update land on distinct instants.
+        var rt = TestRuntime.Create(
+            new AdvancingClock(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero))
+        );
+        var created = await Succ(
+            AddFactHandler<TestRuntime>.Handle(new AddFactCommand("answer", toSeq(["kw"]))),
+            rt
+        );
+
+        var updated = await Succ(
+            UpdateFactHandler<TestRuntime>.Handle(
+                new UpdateFactCommand(created.Id, Some("new answer"), Option<Seq<string>>.None)
+            ),
+            rt
+        );
+
+        Assert.Equal(created.CreatedAt, updated.CreatedAt); // creation time is never rewritten
+        Assert.True(updated.UpdatedAt > created.UpdatedAt); // edit bumps the freshness clock
+    }
+
+    [Fact]
+    public async Task Search_with_non_positive_limit_still_returns_matches()
+    {
+        var rt = TestRuntime.Create();
+        await Add(rt, "alpha shared", "shared");
+        await Add(rt, "beta shared", "shared");
+        await Add(rt, "gamma shared", "shared");
+
+        // limit 0 means "use the default", NOT "return nothing" — only blank terms short-circuit.
+        var hits = await Succ(
+            SearchFactsHandler<TestRuntime>.Handle(
+                new SearchFactsQuery(toSeq(["shared"]), MatchMode.Any, 0)
+            ),
+            rt
+        );
+
+        Assert.Equal(3, hits.Count);
+    }
+
+    [Fact]
+    public async Task Search_caps_results_at_the_requested_limit()
+    {
+        var rt = TestRuntime.Create();
+        await Add(rt, "alpha shared", "shared");
+        await Add(rt, "beta shared", "shared");
+        await Add(rt, "gamma shared", "shared");
+
+        var hits = await Succ(
+            SearchFactsHandler<TestRuntime>.Handle(
+                new SearchFactsQuery(toSeq(["shared"]), MatchMode.Any, 2)
+            ),
+            rt
+        );
+
+        Assert.Equal(2, hits.Count);
+    }
+
+    [Fact]
+    public async Task List_keywords_blank_prefix_behaves_like_no_filter()
+    {
+        var rt = TestRuntime.Create();
+        await Add(rt, "a", "birthday");
+        await Add(rt, "b", "wifi");
+
+        // A whitespace-only prefix is trimmed away and must not filter everything out.
+        var blank = await Succ(
+            ListKeywordsHandler<TestRuntime>.Handle(new ListKeywordsQuery(Some("   "))),
+            rt
+        );
+        var none = await Succ(
+            ListKeywordsHandler<TestRuntime>.Handle(new ListKeywordsQuery(Option<string>.None)),
+            rt
+        );
+
+        Assert.Equal(none.Count, blank.Count);
+        Assert.Contains(blank, k => k.Keyword == "birthday");
+        Assert.Contains(blank, k => k.Keyword == "wifi");
+    }
 }
