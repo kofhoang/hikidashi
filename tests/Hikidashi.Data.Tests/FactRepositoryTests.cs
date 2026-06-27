@@ -113,4 +113,58 @@ public class FactRepositoryTests(PostgresFixture fx)
         Assert.Contains(prefixed, k => k.Keyword == "birthday" && k.Count >= 2);
         Assert.DoesNotContain(prefixed, k => k.Keyword == "wifi");
     }
+
+    // The forgiving-search promises below are SQL/ILIKE behaviour the in-memory fake can only
+    // approximate — they're worth proving against real Postgres. Distinctive tokens keep the
+    // assertions stable in the fixture's shared database.
+
+    [SkippableFact]
+    public async Task Search_matches_a_partial_substring_term()
+    {
+        var repo = Repo();
+        await repo.AddAsync(NewFact("Spare key for the cupboard.", "zqxcupboard"));
+
+        // "zqxcup" is only a prefix of the stored keyword — forgiving ILIKE must still find it.
+        var hits = await repo.SearchAsync(toSeq(["zqxcup"]), MatchMode.Any, 20);
+
+        Assert.Contains(hits, f => f.Content.Contains("cupboard"));
+    }
+
+    [SkippableFact]
+    public async Task Search_is_case_insensitive()
+    {
+        var repo = Repo();
+        await repo.AddAsync(NewFact("The ZQELEPHANT lives upstairs.", "animal"));
+
+        var hits = await repo.SearchAsync(toSeq(["zqelephant"]), MatchMode.Any, 20);
+
+        Assert.Contains(hits, f => f.Content.Contains("ZQELEPHANT"));
+    }
+
+    [SkippableFact]
+    public async Task Search_matches_on_content_not_only_keywords()
+    {
+        var repo = Repo();
+        // The search term appears in the content but in none of the keywords.
+        await repo.AddAsync(NewFact("The zqumbrella is by the door.", "storage", "hallway"));
+
+        var hits = await repo.SearchAsync(toSeq(["zqumbrella"]), MatchMode.Any, 20);
+
+        Assert.Contains(hits, f => f.Content.Contains("zqumbrella"));
+    }
+
+    [SkippableFact]
+    public async Task List_unenriched_returns_only_quick_captures()
+    {
+        var repo = Repo();
+        var quick = NewFact("zqcapture awaiting keywords"); // no keywords -> un-enriched
+        var enriched = NewFact("zqcapture already enriched", "zqkw");
+        await repo.AddAsync(quick);
+        await repo.AddAsync(enriched);
+
+        var pending = await repo.ListUnenrichedAsync(500);
+
+        Assert.Contains(pending, f => f.Id == quick.Id);
+        Assert.DoesNotContain(pending, f => f.Id == enriched.Id);
+    }
 }
